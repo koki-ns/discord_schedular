@@ -4,6 +4,7 @@ import datetime
 import json
 import os.path
 
+import google.auth
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -11,7 +12,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+# SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
 
 class EditCalendar:
     def __init__(self):
@@ -24,25 +28,8 @@ class EditCalendar:
                     print('An error occurred: %s' % error)
 
     def load_credential(self):
-        creds = None
-        # The file token.json stores the user's access and refresh tokens, and is
-        # created automatically when the authorization flow completes for the first
-        # time.
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        # If there are no (valid) credentials available, let the user log in.
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                # トークンがないときの処理、グーグルのログイン画面を呼び出す
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
-            # Save the credentials for the next run
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-        
+        # デフォルトのjsonファイルを探索するはず
+        creds, _ = google.auth.default()
         return creds
     
     def load_calendar(self):
@@ -72,27 +59,53 @@ class EditCalendar:
         created_calendar = self.service.calendars().insert(body=calendar).execute()
         return created_calendar
 
-    def insert_event(self, start, end, summary):
+    def insert_event(self, day:str, summary, time_start:str=None, time_end:str=None):
         #カレンダーに追加するイベントのクエリ（json）について調べる
         #終日で追加する
+        ret: list
+        try:
+            new_event = self.create_event(day, summary, time_start, time_end)
+            new_event = self.service.events().insert(calendarId=self.calendarId, body=new_event).execute()
+            ret = [EXIT_SUCCESS, "追加に成功"]
+        except Exception as e:
+            ret = [EXIT_ERROR, str(e)]
+        return ret
         
-        new_event = self.create_event(start, end, summary)
-        new_event = self.service.events().insert(calendarId=self.calendarId, body=new_event).execute()
-        print("Event created: %s" % (new_event.get('htmlLink')))
-        
-        
-    def create_event(self, start, end, summary):
-        # summaryは予定のタイトル
-        # start.date, end.dateは"2023-04-06" "2023-04-07"といった形で入力する（終日の場合）
-        event = {
-            "summary": summary,
-            "start": {
-                "date":start
-                },
-            "end": {
-                "date":end
-                }
-        }
+    def create_event(self, day: str, summary: str, time_start: str, time_end: str):
+        """
+        想定している引数の形
+        day: yyyy-mm-dd
+        summary: 予定の内容
+        time_start: x:xx:xx
+        time_end: x:xx:xx
+        """
+        if time_start is not None and time_end is not None:
+            start = day + "T" + time_start + ":00"
+            end = day + "T" + time_end + ":00"
+            event = {
+                "summary": summary,
+                "start": {
+                    "dateTime": start,
+                    "timeZone": "Asia/Tokyo"
+                    },
+                "end": {
+                    "dateTime": end,
+                    "timeZone": "Asia/Tokyo"
+                    }
+            }
+        else:
+            day_datetime = datetime.datetime.strptime(day, "%Y-%m-%d")
+            end = datetime.datetime.strftime(day_datetime + datetime.timedelta(days=1), "%Y-%m-%d")
+            event = {
+                "summary": summary,
+                "start": {
+                    "date":day
+                    },
+                "end": {
+                    "date":end
+                    }
+            }
+        #print(event)
         return event
     
     def get_day_events(self, day: datetime.datetime):
@@ -100,25 +113,58 @@ class EditCalendar:
         timeMin = datetime.datetime.strftime(day, '%Y-%m-%d') + "T00:00:00+09:00"
         timeMax = datetime.datetime.strftime(tomorrow, '%Y-%m-%d') + "T00:00:00+09:00"
         events = self.service.events().list(calendarId=self.calendarId, timeMin=timeMin, timeMax=timeMax).execute()
-        #print(events["items"])
-        event_list = []
-        if events["items"]:
-            for event in events["items"]:
-                event_list.append(event["summary"])
-        #print(event_list)
-        return event_list
-            
-            
+        #print(events)
+        return events["items"]
 
-
+    @staticmethod
+    def reshape_events_items(items: list):
+        """
+        想定するデータ構造
+        [
+            [
+                {
+                "summary": "-----",
+                "start_dateTime": x:xx,
+                "end_dateTime": xx:xx,
+                },
+            ],
+            [---, ---, ---]
+        ]
+        """
+        have_period = []
+        whole_day = []
+        
+        for i in items:
+            if "dateTime" in i["start"]:
+                time_start:str = i["start"]["dateTime"][11:16]
+                time_end:str = i["end"]["dateTime"][11:16]
+                
+                if time_start[0] == "0":
+                    time_start = time_start[1:]
+                    
+                if time_end[0] == "0":
+                    time_end = time_end[1:]
+                have_period.append({
+                    "summary": i["summary"],
+                    "time_start": time_start,
+                    "time_end": time_end
+                })
+            elif "date" in i["start"]:
+                whole_day.append(i["summary"])
+        
+        return [have_period, whole_day]        
+                    
+                
+    
 def main():
     editCalendar = EditCalendar()
-    start = "2023-05-08"
-    end = "2023-05-09"
-    summary = "スケジュールテスト"
+    #start = "2023-05-08"
+    #end = "2023-05-09"
+    #summary = "スケジュールテスト"
     #editCalendar.insert_event(start, end, summary)
-    editCalendar.get_day_events(datetime.datetime(2023, 5, 25))
-    
+    editCalendar.get_day_events(datetime.datetime(2023, 5, 19))
+    print(editCalendar.reshape_events_items(editCalendar.get_day_events(datetime.datetime(2023, 5, 19))))
+    print(editCalendar.reshape_events_items(editCalendar.get_day_events(datetime.datetime(2023, 5, 22))))
     
     
 if __name__ == '__main__':

@@ -6,6 +6,9 @@ import editcalendar
 import logging
 import json
 
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+
 token_file = "discord_token.json"
 
 with open(token_file) as f:
@@ -23,6 +26,34 @@ client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
 ec = editcalendar.EditCalendar()
+
+def validate_params(day, year, time_start, time_end):
+    #構文が正しいか解析する処理
+    ret = []
+    
+    if re.fullmatch(r"([1-9]|0[1-9]|1[0-2]) ([1-9]|[0-2][0-9]|3[0-1])", day) is None:
+        ret.append(EXIT_ERROR)
+        ret.append("エラー：日付が不正です")
+        return ret
+    
+    if year is not None and re.fullmatch(r"20[0-9][0-9]", year) is None:
+        ret.append(EXIT_ERROR)
+        ret.append("エラー：西暦が不正です")
+        return ret
+    
+    #時刻のバリデーション
+    if time_start is None or time_end is None:
+        time_start = None
+        time_end = None
+    elif ((re.fullmatch(r"([1-9]|0[1-9]|1[0-9]|2[0-3]):([0-9]|[0-5][0-9])", time_start) is None or re.fullmatch(r"([1-9]|0[1-9]|1[0-9]|2[0-3]):([0-9]|[0-5][0-9])", time_end)) is None) and time_start is  not None:
+        ret.append(EXIT_ERROR)
+        ret.append("エラー：時刻が不正です")
+        return ret
+    
+    ret.append(EXIT_SUCCESS)
+    
+    return ret
+    
 
 @client.event
 async def on_ready():
@@ -58,76 +89,108 @@ async def hello(ctx):
     )
 @discord.app_commands.guild_only()
 async def addcalendar(interaction:discord.Interaction, day:str, summary: str, year: str=None, time_start: str=None, time_end: str=None):
-    try:
+    #try:
         summaries = summary.split(" ")
 
         #構文が正しいか解析する処理
-        if re.fullmatch(r"([1-9]|0[1-9]|1[0-2])/([1-9]|[0-2][0-9]|3[0-1])", day) is None:
-            await interaction.response.send_message("エラー：日付が不正です")
-            return
+        result_validation = validate_params(day, year, time_start, time_end)
         
-        if year is not None and re.fullmatch(r"20[0-9][0-9]", year) is None:
-            await interaction.response.send_message("エラー：西暦が不正です")
-        
-        #時刻のバリデーション
-        if time_start is None or time_end is None:
-            time_start = None
-            time_end = None
-        elif ((re.fullmatch(r"([1-9]|0[1-9]|1[0-9]|2[0-3]):([0-9]|[0-5][0-9])", time_start) is None or re.fullmatch(r"([1-9]|0[1-9]|1[0-9]|2[0-3]):([0-9]|[0-5][0-9])", time_end)) is None) and time_start is  not None:
-            await interaction.response.send_message("エラー：時刻が不正です")
+        if result_validation[0] == EXIT_ERROR:
+            await interaction.response.send_message(result_validation[1])
+            logging.info(result_validation[1])
             return
         
         #dateとsummaryの構築
         if year is None:
             year = str(datetime.date.today().year)
             
-        month_and_day = day.split("/")
-        date_start = year + "-" + month_and_day[0] + "-" + month_and_day[1]
-        today_datetime = datetime.datetime.strptime(date_start, '%Y-%m-%d')
-        tomorrow_datetime = today_datetime + datetime.timedelta(days=1)
-        date_end = datetime.datetime.strftime(tomorrow_datetime, '%Y-%m-%d')
         
-        result = datetime.datetime.strftime(today_datetime, '%Y/%m/%d') + " 予定追加：\n"
-        result_log = datetime.datetime.strftime(today_datetime, '%Y/%m/%d') + "に予定を追加："
+            
+        month_and_day = day.split(" ")
+        date_str = year + "-" + month_and_day[0] + "-" + month_and_day[1]
         
-        for sum in summaries:
-            ec.insert_event(date_start, date_end, sum)
-            #await ctx.send("start:{0}, end:{1}, summary:{2}".format(date_start, date_end, summary))
-            result = result + "・" + sum + "\n"
-            result_log = result_log + " " + sum
+        result_text: str = "{}年{}月{}日に予定を追加しました：\n".format(year, month_and_day[0], month_and_day[1])
+        result_log: str = date_str + "に予定追加："
         
-        await interaction.response.send_message(result)
+        if time_start is not None and time_end is not None:
+            result_insert = ec.insert_event(date_str, summaries[0], time_start, time_end)
+            if result_insert[0] == editcalendar.EXIT_SUCCESS:
+                result_text = result_text + time_start + "-" + time_end + " " + summary
+                result_log = result_log + time_start + "-" + time_end + " " + summary
+            else:
+                result_text = "エラーが発生しました。内容を以下に記します：\n" + result_insert[1]
+        
+        else:
+            for sum in summaries:
+                result_insert = ec.insert_event(date_str, sum)
+                #await ctx.send("start:{0}, end:{1}, summary:{2}".format(date_start, date_end, summary))
+                if result_insert[0] == editcalendar.EXIT_SUCCESS:
+                    result_text = result_text + "・" + sum + "\n"
+                    result_log = result_log + " " + sum
+                else:
+                    result_text = result_text + "・" + sum + "（追加に失敗）" + "\n"
+                    result_log = result_log + " " + sum + "（追加に失敗）"
+            
+        await interaction.response.send_message(result_text)
         logging.info(result_log)
         
         
-    except:
-        await interaction.response.send_message("何かしらのエラーが発生しました")
+    #except:
+    #    await interaction.response.send_message("何かしらのエラーが発生しました")
     #インデックスエラー、構文エラー
     #await ctx.send(arguments)
     
 async def fetch_event(date: datetime.datetime):
-    text = datetime.datetime.strftime(date, "%Y/%m/%d") + "の予定:" + "\n"
-    event_list = ec.get_day_events(date)
+    event_list = editcalendar.EditCalendar.reshape_events_items(ec.get_day_events(date))    
+    text = ""
+    count = 0
+    
     
     if event_list:
-        for event in event_list:
-            text = text + "・" + event + "\n"
+        for have_period in event_list[0]:
+            text = text + "・" + have_period["time_start"] + "〜" + have_period["time_end"] + " " + have_period["summary"] + "\n"
+            count = count + 1
+        
+        text = text + "\n"
+        
+        for whole_day in event_list[1]:
+            text = text + "・" + whole_day + "\n"
+            count = count + 1
+            
+        text_prefix = datetime.datetime.strftime(date, "%Y年%m月%d日") + "の予定は" + str(count) +"つあります：" + "\n"
+        
+        text = text_prefix + text
+        
     else:
-        text = text + "登録された予定はありません"
+        text_prefix = datetime.datetime.strftime(date, "%Y年%m月%d日") + "の予定：" + "\n"
+        text = text_prefix + "登録された予定はありません"
     
     return text
 
 @tree.command(
-    name="today_events",
-    description="今日の予定を表示します"
+    name="show_events",
+    description="指定された日の予定を表示します。指定がなければ今日の予定を表示します。"
 )
 @discord.app_commands.guild_only()
-async def today_events(interaction: discord.Interaction):
-    today = datetime.datetime.today()
-    text = await fetch_event(today)
+async def show_events(interaction: discord.Interaction, day: str=None, year: str=None):
+    if day == None:
+        #引数がなければ今日の予定を表示
+        target_datetime = datetime.datetime.today()
+    elif re.fullmatch(r"([1-9]|0[1-9]|1[0-2]) ([1-9]|[0-2][0-9]|3[0-1])", day) is None:
+        await interaction.response.send_message("日付の入力が不正です")
+        return
+    else:
+        #dateとsummaryの構築
+        if year is None:
+            year = str(datetime.date.today().year)
+            
+        month_and_day = day.split(" ")
+        date_start = year + "-" + month_and_day[0] + "-" + month_and_day[1]
+        target_datetime = datetime.datetime.strptime(date_start, '%Y-%m-%d')
+    text = await fetch_event(target_datetime)
     await interaction.response.send_message(text)
     logging.info("today_events is called")
-    
+
 @tasks.loop(seconds=60)
 async def morning_call():
     global CHANNEL_ID
