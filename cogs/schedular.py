@@ -20,7 +20,7 @@ class Schedular(commands.Cog):
         self.morning_call.start()
         
         
-    def validate_params(day, year, time_start, time_end):
+    def validate_params(self, day, year, time_start, time_end):
         #構文が正しいか解析する処理
         ret = []
         
