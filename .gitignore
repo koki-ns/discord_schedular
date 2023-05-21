@@ -7,3 +7,4 @@ credentials.json
 token.json
 discord_token.json
 secret.txt
+nohup.out
