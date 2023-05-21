@@ -112,7 +112,7 @@ class EditCalendar:
         tomorrow = day + datetime.timedelta(days=1)
         timeMin = datetime.datetime.strftime(day, '%Y-%m-%d') + "T00:00:00+09:00"
         timeMax = datetime.datetime.strftime(tomorrow, '%Y-%m-%d') + "T00:00:00+09:00"
-        events = self.service.events().list(calendarId=self.calendarId, timeMin=timeMin, timeMax=timeMax).execute()
+        events = self.service.events().list(calendarId=self.calendarId, timeMin=timeMin, timeMax=timeMax, singleEvents=True).execute()
         #print(events)
         return events["items"]
 
@@ -133,15 +133,14 @@ class EditCalendar:
         """
         have_period = []
         whole_day = []
-        
         for i in items:
-            if "dateTime" in i["start"]:
+            if "start" in i and "dateTime" in i["start"]:
                 have_period.append({
                     "summary": i["summary"],
                     "time_start": i["start"]["dateTime"],
                     "time_end": i["end"]["dateTime"]
                 })
-            elif "date" in i["start"]:
+            elif "start" in i and "date" in i["start"]:
                 whole_day.append(i["summary"])
         
         have_period = sorted(have_period, key=lambda h: h["time_start"])
@@ -168,7 +167,8 @@ def main():
     #summary = "スケジュールテスト"
     #editCalendar.insert_event(start, end, summary)
     editCalendar.get_day_events(datetime.datetime(2023, 5, 19))
-    print(editCalendar.reshape_events_items(editCalendar.get_day_events(datetime.datetime(2023, 5, 20))))
+    print(editCalendar.reshape_events_items(editCalendar.get_day_events(datetime.datetime(2023, 5, 22))))
+    print(editCalendar.reshape_events_items(editCalendar.get_day_events(datetime.datetime(2023, 5, 23))))
     
     
 if __name__ == '__main__':
