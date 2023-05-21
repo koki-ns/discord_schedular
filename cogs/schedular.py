@@ -192,7 +192,7 @@ class Schedular(commands.Cog):
                 channel = self.bot.get_channel(self.channel_id)
                 text = "21時になりました。\n明日の予定を通知します。\n"
                 tomorrow = now + datetime.timedelta(days=1)
-                text = text + await self.fetch_event(now)
+                text = text + await self.fetch_event(tomorrow)
                 await channel.send(text) 
                 logging.info("night call")
     
